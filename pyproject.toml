@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "concordia-tests"
+version = "0.1.0"
+description = "Concordia-based social simulation experiments."
+requires-python = ">=3.13"
+dependencies = [
+    # gdm-concordia is installed separately as an editable install from
+    # C:\Users\Owner\Home\dev\agents\concordia (contains a local OpenRouter
+    # wrapper not yet in upstream). See README for setup.
+    "anthropic>=0.86.0",
+    "openai>=1.3.0",             # also the transport for OpenRouter
+    "sentence-transformers>=2.2", # embedder for AssociativeMemory
+    "python-dotenv>=1.0",        # loads .env at the project root
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ipykernel",
+    "jupyter",
+]
+
+# This project is a folder of scripts (sim_*.py + shared.py), not a Python
+# package. pyproject.toml is here purely to declare dependencies and dev
+# tools so `pip install -e ".[dev]"` provisions the venv reproducibly.
+[tool.setuptools]
+packages = []
+py-modules = []

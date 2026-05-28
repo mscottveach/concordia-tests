@@ -7,6 +7,7 @@ files stay focused on what they're simulating.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -590,3 +591,94 @@ def write_story_html(
 """
     path.write_text(html, encoding="utf-8")
     return path
+
+
+def play_with_replay(
+    sim: Any,
+    *,
+    name: str,
+    log_dir: str | Path = "logs",
+    raw_log: list[Any] | None = None,
+    **play_kwargs: Any,
+) -> tuple[Any, Path]:
+    """Run `sim.play()` while capturing a per-turn replay log.
+
+    Writes a JSONL file (one JSON object per line, one line per simulation
+    step) capturing each step's actor, raw action text, active game master,
+    and a full snapshot of every entity's and game master's memory at the
+    point the step completed. This is the input the replay dashboard reads.
+
+    Why a snapshot per step (and not a single end-of-sim dump): memories
+    accumulate, so the dashboard needs to know what each entity remembered
+    *at any chosen turn*. Snapshotting per step lets the dashboard scrub
+    through the timeline.
+
+    The function is a thin wrapper around `sim.play()` — same args
+    (forwarded), same return value (returned). If the caller already
+    supplied a `step_callback` it is chained, not overridden. The path
+    convention matches `write_sim_log` / `write_story_html` so the three
+    files for a single run sit next to each other in `logs/`.
+
+    Args:
+      sim: The `Simulation` instance to run.
+      name: Sim name used to build the log filename, e.g. ``"sim_rooms"``.
+      log_dir: Directory the replay file is written to. Created if absent.
+      raw_log: Optional `raw_log` list to pass into `sim.play()`. If None,
+        the simulation's internal raw_log is used (still accessible later
+        via `sim.get_raw_log()`).
+      **play_kwargs: Additional kwargs forwarded to `sim.play()`.
+
+    Returns:
+      A `(play_result, replay_path)` tuple. `play_result` is whatever
+      `sim.play()` returns; `replay_path` is the resolved `Path` written.
+    """
+    replay_records: list[dict[str, Any]] = []
+
+    def _capture(step_data: Any) -> None:
+        # Snapshot every entity's and GM's complete memory at this step.
+        # Memory access goes through the entity's __memory__ component if
+        # present; missing components are tolerated (returns empty list)
+        # so this stays robust across sim flavors that wire memory
+        # differently.
+        memories: dict[str, list[str]] = {}
+        try:
+            actors = list(sim.get_entities()) + list(sim.get_game_masters())
+        except Exception:  # noqa: BLE001  defensive against sim API drift
+            actors = []
+        for actor in actors:
+            try:
+                mem_component = actor.get_component("__memory__")
+                memories[actor.name] = list(
+                    mem_component.get_all_memories_as_text()
+                )
+            except Exception:  # noqa: BLE001
+                memories[actor.name] = []
+
+        record = {
+            "turn": getattr(step_data, "step", None),
+            "actor": getattr(step_data, "acting_entity", None),
+            "action": getattr(step_data, "action", None),
+            "game_master": getattr(step_data, "game_master", None),
+            "memories": memories,
+        }
+        replay_records.append(record)
+
+    user_callback = play_kwargs.get("step_callback")
+    if user_callback is not None:
+        def chained(step_data: Any) -> None:
+            user_callback(step_data)
+            _capture(step_data)
+        play_kwargs["step_callback"] = chained
+    else:
+        play_kwargs["step_callback"] = _capture
+
+    result = sim.play(raw_log=raw_log, **play_kwargs)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    replay_path = Path(log_dir) / f"{name}_{timestamp}.jsonl"
+    replay_path.parent.mkdir(parents=True, exist_ok=True)
+    with replay_path.open("w", encoding="utf-8") as f:
+        for record in replay_records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    return result, replay_path

@@ -216,7 +216,9 @@ def main() -> None:
     config = build_config(model)
     sim = simulation.Simulation(config=config, model=model, embedder=embedder)
     print("[sim_rooms] running...")
-    result = sim.play(raw_log=raw_log)
+    result, replay_path = shared.play_with_replay(
+        sim, name="sim_rooms", raw_log=raw_log
+    )
     print("[sim_rooms] done")
 
   log_path = shared.write_sim_log(
@@ -230,8 +232,9 @@ def main() -> None:
       raw_log=raw_log,
       metadata=metadata,
   )
-  print(f"[sim_rooms] log written:   {log_path}")
-  print(f"[sim_rooms] story written: {story_path}")
+  print(f"[sim_rooms] log written:    {log_path}")
+  print(f"[sim_rooms] story written:  {story_path}")
+  print(f"[sim_rooms] replay written: {replay_path}")
 
 
 if __name__ == "__main__":
